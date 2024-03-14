@@ -34,5 +34,14 @@ This is a userscript that adds a "Search" as the third item on the course naviga
    - Multiple search terms can be provided
    - Every word is treated as a separate search term (split by spaces)
    - Use double-quotation marks (") to provide a search phrase
+   - Search results are sorted in order of:
+      1. the combined total of matches of terms from highest-to-lowest
+      2. the content type
+          1. Assignments
+          2. Discussion Topics
+          3. Quizzes
+          4. Pages
+          5. Module Items
+      3. the activity IDs
 
 [Back to Top](#canvas-javascript-courseSearch)
