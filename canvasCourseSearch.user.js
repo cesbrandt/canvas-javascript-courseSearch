@@ -1,10 +1,14 @@
 // ==UserScript==
-// @name         Canvas Course Search
-// @version      0.4
-// @include      /^https?:\/\/[^\.]*\.([^\.]*\.)?instructure\.com\/courses\/.*$/
-// @updateURL    https://raw.githubusercontent.com/cesbrandt/canvas-javascript-courseSearch/master/canvasCourseSearch.user.js
-// @grant        none
+// @name          Canvas Course Search
+// @description   Adds a much needed search feature to Canvas LMS courses.
+// @version       0.5
+// @match         https://*.instructure.com/courses/*
+// @downloadURL   https://raw.githubusercontent.com/cesbrandt/canvas-javascript-courseSearch/master/canvasCourseSearch.user.js
+// @updateURL     https://raw.githubusercontent.com/cesbrandt/canvas-javascript-courseSearch/master/canvasCourseSearch.user.js
+// @grant         none
 // ==/UserScript==
+
+const delay = ms => new Promise(res => setTimeout(res, ms));
 
 /**
  * @name          Build Variable Object
@@ -143,13 +147,13 @@ let callAPI = async (type, context, page, getVars, oncomplete, oncompleteInput, 
 		expandedVars[0].page = page;
 		expandedVars[0].per_page = 100;
 
-		var callsToMake = {callURL: callURL, data: extend({}, expandedVars[0])};
+		var callsToMake = { callURL: callURL, data: extend({}, expandedVars[0]) };
 		if(page === 1 || audit || lastPage === -1) {
 			callAJAX(type, callURL, expandedVars[0]).then(response => {
 				var json = JSON.parse(response.data.replace('while(1);', ''));
 
 				if(response.status != 200) {
-					oncomplete({error: 'There was an error. Please try again.'});
+					oncomplete({ error: 'There was an error. Please try again.' });
 				} else {
 					json = audit ? json.events : json;
 					let results = (firstCall.length == 1 && isEmpty(firstCall[0])) ? json : extend(firstCall, json);
@@ -212,7 +216,7 @@ let callAPI = async (type, context, page, getVars, oncomplete, oncompleteInput, 
  * @description   Calls the the specified URL with supplied data
  * @return obj    Full AJAX call is returned for processing elsewhere
  */
-let	callAJAX = async (type, callURL, data) => {
+let callAJAX = async (type, callURL, data) => {
 	var res;
 	if(type == 'GET') {
 		res = await fetch(callURL + '?' + dataToHttp(data), {
@@ -317,54 +321,127 @@ let buildPage = async () => {
 		searchBtn.style.marginBottom = getComputedStyle(search).getPropertyValue('margin-bottom');
 
 		// Search the course content via API
-		let runSearch = () => {
-			callAPI('GET', [view, viewID, 'assignments'], 1, [{}], assignments => {
-				callAPI('GET', [view, viewID, 'discussion_topics'], 1, [{}], discussion_topics => {
-					callAPI('GET', [view, viewID, 'quizzes'], 1, [{}], quizzes => {
-						callAPI('GET', [view, viewID, 'pages'], 1, [{'include':['body']}], pages => {
-							callAPI('GET', [view, viewID, 'modules'], 1, [{'include':['items']}], modules => {
+		let runSearch = async () => {
+			// Retrueve course content
+			var content = {
+				Assignment: {},
+				Discussion: {},
+				Quiz: {},
+				Page: {},
+				ModuleItem: {}
+			};
+			await callAPI('GET', [view, viewID, 'assignments'], 1, [{}], async assignments => {
+				if(Array.isArray(assignments)) {
+					assignments.forEach(assignment => {
+						content.Assignment[assignment.id] = assignment;
+					});
+				}
+				await callAPI('GET', [view, viewID, 'discussion_topics'], 1, [{}], async discussion_topics => {
+					if(Array.isArray(discussion_topics)) {
+						discussion_topics.forEach(discussion_topic => {
+							content.Discussion[discussion_topic.id] = discussion_topic;
+						});
+					}
+					await callAPI('GET', [view, viewID, 'quizzes'], 1, [{}], async quizzes => {
+						if(Array.isArray(quizzes)) {
+							quizzes.forEach(quiz => {
+								content.Quiz[quiz.id] = quiz;
+							});
+						}
+						await callAPI('GET', [view, viewID, 'pages'], 1, [{ 'include': ['body'] }], async pages => {
+							if(Array.isArray(pages)) {
+								pages.forEach(page => {
+									content.Page[page.page_url] = page;
+								});
+							}
+							await callAPI('GET', [view, viewID, 'modules'], 1, [{ 'include': ['items'] }], async modules => {
+								if(Array.isArray(modules)) {
+									var call = 0;
+									for(var i = 0; i < modules.length; i++) {
+										var module = modules[i];
+										for(var j = 0; j < module.items.length; j++) {
+											var item = module.items[j];
+											switch(item.type) {
+												case 'ExternalUrl':
+												case 'ExternalTool':
+													content.ModuleItem[item.id] = item;
+													break;
+												case 'Assignment':
+												case 'Discussion':
+												case 'Quiz':
+												case 'Page':
+													var type = '';
+													if(item.type == 'Assignment') {
+														type = 'assignments';
+													} else if(item.type == 'Discussion') {
+														type = 'discussion_topics';
+													} else if(item.type == 'Quiz') {
+														type = 'quizzes';
+													} else if(item.type == 'Page') {
+														type = 'pages';
+													}
+													if(content[item.type][item.content_id] == undefined) {
+														var id = item.type == "Page" ? item.page_url : item.content_id;
+														await callAPI('GET', [view, viewID, type, id], 1, [{ 'include': ['body'] }], itemContent => {
+															content[item.type][id] = itemContent;
+														});
+														await delay(500);
+													}
+													break;
+											}
+										}
+									}
+								}
+								console.log(content);
+
+								// Parse search query
 								var query = search.value.match(/(".*?"|[^"\s]+)+(?=\s*|\s*$)/g);
-								for(var i = 0; i < query.length; i++ ) {
+								for(i = 0; i < query.length; i++) {
 									query[i] = query[i].replaceAll('"', '');
 								}
+
+								// Search content
 								var matches = [], lookup;
 								var parser = new DOMParser();
 								var doc = parser.parseFromString(html, 'text/html');
-								var results = '<table class="ic-Table ic-Table--condensed"><tbody>';
-								assignments.forEach(assignment => {
+								for(id in content.Assignment) {
+									var assignment = content.Assignment[id];
 									lookup = getMatches(parser.parseFromString(assignment.description, 'text/html').querySelector('body').innerText, query);
 									if(lookup !== null) {
-										matches.push({id: assignment.id, type: 'assignment', name: assignment.name, matches: lookup});
+										matches.push({ id: assignment.id, type: 'assignment', name: assignment.name, matches: lookup });
 									}
-								});
-								discussion_topics.forEach(discussion_topic => {
+								}
+								for(id in content.Discussion) {
+									var discussion_topic = content.Discussion[id];
 									lookup = getMatches(parser.parseFromString(discussion_topic.message, 'text/html').querySelector('body').innerText, query);
 									if(lookup !== null) {
-										matches.push({id: discussion_topic.id, type: 'discussion_topic', name: discussion_topic.title, matches: lookup});
+										matches.push({ id: discussion_topic.id, type: 'discussion_topic', name: discussion_topic.title, matches: lookup });
 									}
-								});
-								quizzes.forEach(quiz => {
+								}
+								for(id in content.Quiz) {
+									var quiz = content.Quiz[id];
 									lookup = getMatches(parser.parseFromString(quiz.description, 'text/html').querySelector('body').innerText, query);
 									if(lookup !== null) {
-										matches.push({id: quiz.id, type: 'quiz', name: quiz.title, matches: lookup});
+										matches.push({ id: quiz.id, type: 'quiz', name: quiz.title, matches: lookup });
 									}
-								});
-								pages.forEach(page => {
+								}
+								for(id in content.Page) {
+									var page = content.Page[id];
 									lookup = getMatches(parser.parseFromString(page.body, 'text/html').querySelector('body').innerText, query);
 									if(lookup !== null) {
-										matches.push({id: page.url, type: 'page', name: page.title, matches: lookup});
+										matches.push({ id: page.url, type: 'page', name: page.title, matches: lookup });
 									}
-								});
-								modules.forEach(module => {
-									module.items.forEach(item => {
-										if(['ExternalUrl', 'ExternalTool'].includes(item.type)) {
-											lookup = getMatches(item.external_url, query);
-											if(lookup !== null) {
-												matches.push({id: item.id, type: item.type, name: item.title, matches: lookup});
-											}
-										}
-									});
-								});
+								}
+								for(id in content.ModuleItem) {
+									var moduleItem = content.ModuleItem[id];
+									lookup = getMatches(moduleItem.external_url, query);
+									if(lookup !== null) {
+										matches.push({ id: moduleItem.id, type: moduleItem.type, name: moduleItem.title, matches: lookup });
+									}
+								}
+
+								// Build and display the results
+								var results = '<table class="ic-Table ic-Table--condensed"><tbody>';
 								matches.sort((a, b) => {
 									return b.matches.length - a.matches.length;
 								}).forEach(match => {
@@ -435,7 +512,7 @@ let updateNav = () => {
 	searchLink.querySelector('a').setAttribute('aria-label', 'Search Course Content');
 	searchLink.querySelector('a').setAttribute('class', 'search');
 	searchLink.querySelector('a').removeAttribute('title');
-	searchLink.querySelector('a').href = searchLink.querySelector('a').href.replace(searchLink.querySelector('a').href.split('/')[searchLink.querySelector('a').href.split('/').length - 1], 'search');
+	searchLink.querySelector('a').href = '/' + view + '/' + viewID + '/search';
 	searchLink.querySelector('a').innerHTML = 'Search';
 	announcementsLink.after(searchLink);
 
