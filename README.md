@@ -1,12 +1,29 @@
 # canvas-javascript-courseSearch
 This is a userscript that adds a "Search" as the third item on the course navigation.
 
+## Disclaimer
+This userscript uses the API access of the current user and results will be limited by what the current user has rights to. It is **_NOT_** a means to gain access to unpublished content. Anything that is unpublished or locked for a user will still be so when using this userscript.
+
 #### Table of Contents
  - [Changelog](#changelog)
  - [Dependencies](#dependencies)
  - [How-To Use](#how-to-use)
 
 #### Changelog
+03/21/2014
+ - Added fallback content lookup, via the Modules list, for courses where the content lists (Pages, Discussions, Quizzes, and Assignments) are hidden in the course navigation
+   - Modules list is disablable
+   - Limited to content that is linked into a module
+   - Potential for additional fallback lookups:
+     - Calendar: limited to content with due/todo dates
+     - Gradebook: limited to graded content
+     - Syllabus Course Summary: disablable and unable to list Pages lacking todo dates
+     - Content Parsing for Additional Links
+       - limited by the need for additional content to be linked
+       - would be a "last resort" option and assume the body of the whatever is the course homepage is the tree root
+ - Hardcoded the HREF of the "Search" link being added to the navigation (on some pages it was incorrectly loading)
+ - Updated userscript header block to eliminate eslint warnings
+
 03/14/2024
  - Initial Load
 
